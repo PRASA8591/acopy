@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hospital ERP — Module & Page RBAC (Vanilla JS + Dexie.js)</title>
-  <script src="https://unpkg.com/dexie@3.2.7/dist/dexie.min.js"></script>
+  <title>Hospital ERP — Module & Page RBAC (Vanilla JS + Firebase)</title>
   <style>
     :root {
       --navy: #141c78;
@@ -356,9 +355,42 @@
       z-index: 120;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
+
+    body:not(.authenticated) > :not(#authGate) { display: none !important; }
+    .auth-gate {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: var(--bg);
+    }
+    .auth-card {
+      width: 100%;
+      max-width: 420px;
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+      text-align: center;
+    }
+    .auth-card h1 { margin-bottom: 10px; font-size: 22px; }
+    .auth-card p { margin-bottom: 18px; color: var(--muted); line-height: 1.5; }
+    .auth-card button { width: 100%; }
+    .auth-message { margin-top: 14px; color: var(--red); font-size: 13px; }
+    body.authenticated #authGate { display: none; }
   </style>
 </head>
 <body>
+
+  <section id="authGate" class="auth-gate">
+    <div class="auth-card">
+      <h1>Hospital ERP</h1>
+      <p>Sign in with the authorized Google account to access Firestore data.</p>
+      <button id="googleSignInBtn" class="btn">Continue with Google</button>
+      <div id="authMessage" class="auth-message" role="status" aria-live="polite"></div>
+    </div>
+  </section>
 
   <!-- Top Navigation Bar -->
   <header class="topnav">
@@ -371,6 +403,7 @@
         <span>Active User:</span>
         <select id="activeUserSelect"></select>
       </div>
+      <button id="signOutBtn" class="btn btn-outline btn-sm">Sign Out</button>
     </div>
   </header>
 
@@ -398,7 +431,29 @@
 
   <div id="toast" class="toast"></div>
 
-  <script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js";
+    import {
+      getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut
+    } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
+    import {
+      collection, deleteDoc, doc, getDoc, getDocs, getFirestore, query,
+      runTransaction, setDoc, updateDoc, where, writeBatch
+    } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDrTmRtNuOs0_f56CbpTyj7YvuCVR6vgnQ",
+      authDomain: "acopy-97cd1.firebaseapp.com",
+      projectId: "acopy-97cd1",
+      storageBucket: "acopy-97cd1.firebasestorage.app",
+      messagingSenderId: "20382072945",
+      appId: "1:20382072945:web:cb26bb59f655892dac5bd0"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const googleProvider = new GoogleAuthProvider();
+    const firestore = getFirestore(app);
+    const authorizedEmail = "punsaraprasanna@gmail.com";
     // ==========================================
     // 1. MODULES & PAGES DEFINITION
     // ==========================================
@@ -462,21 +517,105 @@
     };
 
     // ==========================================
-    // 2. DEXIE DATABASE SETUP
+    // 2. FIRESTORE DATABASE SETUP
     // ==========================================
-    const db = new Dexie("HospitalERP_RBAC_DB");
-    db.version(1).stores({
-      items: "++id, &code, name, category, batchNo, expiryDate, unit, qty, unitCost, reorderLevel",
-      binCards: "++id, itemCode, itemName, type, refNo, deptOrSupplier, qtyChange, balanceAfter, date",
-      grns: "++id, grnNo, supplier, itemCode, qty, unitCost, totalCost, date",
-      issues: "++id, issueNo, department, itemCode, qty, issuedBy, date",
-      pos: "++id, poNo, supplier, itemCode, qty, status, date",
-      prs: "++id, prNo, requestedBy, itemCode, qty, status, date",
-      patients: "++id, uhid, name, age, wardOrArea, status, billAmount, date",
-      prescriptions: "++id, rxNo, patientName, medicineCode, qty, status, date",
-      labOrders: "++id, orderNo, patientName, testName, status, result, date",
-      users: "++id, &username, fullName, role, isAdmin, status"
-    });
+    const collectionNames = [
+      "items", "binCards", "grns", "issues", "pos", "prs",
+      "patients", "prescriptions", "labOrders", "users"
+    ];
+    const uniqueFields = {
+      items: "code",
+      patients: "uhid",
+      prescriptions: "rxNo",
+      labOrders: "orderNo",
+      users: "username"
+    };
+
+    function documentData(snapshot) {
+      return { ...snapshot.data(), id: snapshot.id };
+    }
+
+    function orderedDocuments(snapshot, reverse = false) {
+      const documents = snapshot.docs.map(documentData);
+      documents.sort((a, b) => {
+        const order = (a._createdAt || 0) - (b._createdAt || 0) || a.id.localeCompare(b.id);
+        return reverse ? -order : order;
+      });
+      return documents;
+    }
+
+    function createCollectionApi(name) {
+      const collectionRef = collection(firestore, name);
+      const uniqueField = uniqueFields[name];
+      const makeId = value => `${uniqueField}_${encodeURIComponent(String(value))}`;
+
+      async function toArray(field, value, reverse = false) {
+        const target = field ? query(collectionRef, where(field, "==", value)) : collectionRef;
+        return orderedDocuments(await getDocs(target), reverse);
+      }
+
+      return {
+        toArray: () => toArray(),
+        reverse: () => ({ toArray: () => toArray(undefined, undefined, true) }),
+        where: field => ({
+          equals: value => ({
+            toArray: () => toArray(field, value),
+            first: async () => (await toArray(field, value))[0]
+          })
+        }),
+        get: async id => {
+          const snapshot = await getDoc(doc(firestore, name, String(id)));
+          return snapshot.exists() ? documentData(snapshot) : undefined;
+        },
+        count: async () => (await getDocs(collectionRef)).size,
+        add: async data => {
+          const createdAt = Date.now();
+          if (uniqueField) {
+            const reference = doc(firestore, name, makeId(data[uniqueField]));
+            await runTransaction(firestore, async transaction => {
+              const existing = await transaction.get(reference);
+              if (existing.exists()) {
+                const error = new Error(`${uniqueField} already exists`);
+                error.code = "already-exists";
+                throw error;
+              }
+              transaction.set(reference, { ...data, _createdAt: createdAt });
+            });
+            return reference.id;
+          }
+          const reference = doc(collectionRef);
+          await setDoc(reference, { ...data, _createdAt: createdAt });
+          return reference.id;
+        },
+        bulkAdd: async records => {
+          const batch = writeBatch(firestore);
+          records.forEach((data, index) => {
+            const reference = uniqueField
+              ? doc(firestore, name, makeId(data[uniqueField]))
+              : doc(collectionRef);
+            batch.set(reference, { ...data, _createdAt: Date.now() + index });
+          });
+          await batch.commit();
+        },
+        update: async (id, changes) => {
+          const { id: ignoredId, ...data } = changes;
+          await updateDoc(doc(firestore, name, String(id)), data);
+        },
+        delete: id => deleteDoc(doc(firestore, name, String(id)))
+      };
+    }
+
+    const db = Object.fromEntries(collectionNames.map(name => [name, createCollectionApi(name)]));
+    db.reset = async () => {
+      for (const name of collectionNames) {
+        const snapshot = await getDocs(collection(firestore, name));
+        for (let start = 0; start < snapshot.docs.length; start += 500) {
+          const batch = writeBatch(firestore);
+          snapshot.docs.slice(start, start + 500).forEach(record => batch.delete(record.ref));
+          await batch.commit();
+        }
+      }
+    };
 
     async function seedDatabase() {
       if ((await db.items.count()) === 0) {
@@ -621,7 +760,7 @@
       if (!activeUsers.length) return;
 
       if (preferredUserId) {
-        state.currentUser = activeUsers.find(u => u.id === Number(preferredUserId)) || activeUsers[0];
+        state.currentUser = activeUsers.find(u => u.id === String(preferredUserId)) || activeUsers[0];
       } else if (state.currentUser) {
         state.currentUser = activeUsers.find(u => u.id === state.currentUser.id) || activeUsers[0];
       } else {
@@ -880,8 +1019,8 @@
                     <td>${i.unitCost.toLocaleString()}</td>
                     <td>${i.reorderLevel}</td>
                     <td>
-                      <button class="btn btn-outline btn-sm" onclick="openItemModal(${i.id})">Edit</button>
-                      <button class="btn btn-danger btn-sm" onclick="deleteItem(${i.id}, '${i.code}')">Delete</button>
+                      <button class="btn btn-outline btn-sm" onclick="openItemModal(${JSON.stringify(i.id)})">Edit</button>
+                      <button class="btn btn-danger btn-sm" onclick="deleteItem(${JSON.stringify(i.id)}, ${JSON.stringify(i.code)})">Delete</button>
                     </td>
                   </tr>
                 `).join("") : `<tr><td colspan="10" class="empty">No items yet.</td></tr>`}
@@ -944,8 +1083,9 @@
           }
           closeModal();
           renderItemMaster(document.getElementById("pageContent"));
-        } catch {
-          alert("Item code already exists!");
+        } catch (error) {
+          console.error("Unable to save item", error);
+          alert(error.code === "already-exists" ? "Item code already exists!" : "Unable to save item. Check your Firestore configuration and try again.");
         }
       });
     }
@@ -1066,7 +1206,7 @@
           <h2>PO List</h2>
           <div class="table-wrap">
             <table><thead><tr><th>PO No</th><th>Supplier</th><th>Item</th><th>Qty</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
-            <tbody>${pos.length ? pos.map(p => `<tr><td>${p.poNo}</td><td>${p.supplier}</td><td>${p.itemCode}</td><td>${p.qty}</td><td><span class="badge ${p.status === 'Received' ? 'badge-ok' : 'badge-warn'}">${p.status}</span></td><td>${p.date}</td><td>${p.status === 'Pending' ? `<button class="btn btn-success btn-sm" onclick="receivePO(${p.id})">Receive</button>` : 'Done'}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No POs yet.</td></tr>`}</tbody></table>
+            <tbody>${pos.length ? pos.map(p => `<tr><td>${p.poNo}</td><td>${p.supplier}</td><td>${p.itemCode}</td><td>${p.qty}</td><td><span class="badge ${p.status === 'Received' ? 'badge-ok' : 'badge-warn'}">${p.status}</span></td><td>${p.date}</td><td>${p.status === 'Pending' ? `<button class="btn btn-success btn-sm" onclick="receivePO(${JSON.stringify(p.id)})">Receive</button>` : 'Done'}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No POs yet.</td></tr>`}</tbody></table>
           </div>
         </div>
       `;
@@ -1110,7 +1250,7 @@
           <h2>PR List</h2>
           <div class="table-wrap">
             <table><thead><tr><th>PR No</th><th>By</th><th>Item</th><th>Qty</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
-            <tbody>${prs.length ? prs.map(r => `<tr><td>${r.prNo}</td><td>${r.requestedBy}</td><td>${r.itemCode}</td><td>${r.qty}</td><td><span class="badge ${r.status === 'Approved' ? 'badge-ok' : 'badge-warn'}">${r.status}</span></td><td>${r.date}</td><td>${r.status === 'Pending' ? `<button class="btn btn-sm" onclick="approvePR(${r.id})">Approve</button>` : 'Approved'}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No PRs yet.</td></tr>`}</tbody></table>
+            <tbody>${prs.length ? prs.map(r => `<tr><td>${r.prNo}</td><td>${r.requestedBy}</td><td>${r.itemCode}</td><td>${r.qty}</td><td><span class="badge ${r.status === 'Approved' ? 'badge-ok' : 'badge-warn'}">${r.status}</span></td><td>${r.date}</td><td>${r.status === 'Pending' ? `<button class="btn btn-sm" onclick="approvePR(${JSON.stringify(r.id)})">Approve</button>` : 'Approved'}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No PRs yet.</td></tr>`}</tbody></table>
           </div>
         </div>
       `;
@@ -1203,7 +1343,7 @@
               <tr>
                 <td><strong>${r.rxNo}</strong></td><td>${r.patientName}</td><td>${r.medicineCode}</td><td>${r.qty}</td>
                 <td><span class="badge ${r.status === 'Dispensed' ? 'badge-ok' : 'badge-warn'}">${r.status}</span></td>
-                <td>${r.status !== 'Dispensed' ? `<button class="btn btn-success btn-sm" onclick="dispenseRx(${r.id})">Dispense</button>` : 'Dispensed'}</td>
+                <td>${r.status !== 'Dispensed' ? `<button class="btn btn-success btn-sm" onclick="dispenseRx(${JSON.stringify(r.id)})">Dispense</button>` : 'Dispensed'}</td>
               </tr>
             `).join("")}</tbody></table>
           </div>
@@ -1423,8 +1563,8 @@
                       <td>${modBadges}</td>
                       <td><span class="badge ${u.status === 'Active' ? 'badge-ok' : 'badge-low'}">${u.status}</span></td>
                       <td>
-                        <button class="btn btn-outline btn-sm" onclick="openUserModal(${u.id})">Edit Access</button>
-                        <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${u.username}')">Remove</button>
+                        <button class="btn btn-outline btn-sm" onclick="openUserModal(${JSON.stringify(u.id)})">Edit Access</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteUser(${JSON.stringify(u.id)}, ${JSON.stringify(u.username)})">Remove</button>
                       </td>
                     </tr>
                   `;
@@ -1561,8 +1701,9 @@
           closeModal();
           await syncUserAndNavigation(state.currentUser?.id);
           await renderPage();
-        } catch {
-          alert("Username already exists!");
+        } catch (error) {
+          console.error("Unable to save user", error);
+          alert(error.code === "already-exists" ? "Username already exists!" : "Unable to save user. Check your Firestore configuration and try again.");
         }
       });
     }
@@ -1603,8 +1744,8 @@
     function renderSystemConfig(container) {
       container.innerHTML = `
         <div class="card">
-          <h2>System Configuration & Dexie Storage</h2>
-          <p style="color:var(--muted);margin:10px 0;">Data stored in IndexedDB database: <strong>HospitalERP_RBAC_DB</strong></p>
+          <h2>System Configuration & Firestore</h2>
+          <p style="color:var(--muted);margin:10px 0;">Data stored in Firebase Cloud Firestore: <strong>acopy-97cd1</strong></p>
           <button class="btn btn-danger" onclick="resetDB()">Reset All Demo Data</button>
         </div>
       `;
@@ -1612,9 +1753,14 @@
 
     async function resetDB() {
       if (!confirm("Reset database to initial demo records?")) return;
-      await db.delete();
+      await db.reset();
       location.reload();
     }
+
+    Object.assign(window, {
+      closeModal, selectModule, selectTab, openItemModal, deleteItem,
+      receivePO, approvePR, dispenseRx, openUserModal, deleteUser, resetDB
+    });
 
     // ==========================================
     // 10. EVENT LISTENERS & BOOT
@@ -1632,16 +1778,59 @@
     });
 
     document.getElementById("activeUserSelect").addEventListener("change", async (e) => {
-      await syncUserAndNavigation(Number(e.target.value));
+      await syncUserAndNavigation(e.target.value);
       await renderPage();
       showToast(`Logged in as ${state.currentUser.fullName}`);
     });
 
-    (async function init() {
-      await seedDatabase();
-      await syncUserAndNavigation();
-      await renderPage();
-    })();
+    let appInitialized = false;
+    const authMessage = document.getElementById("authMessage");
+    const googleSignInBtn = document.getElementById("googleSignInBtn");
+
+    googleProvider.setCustomParameters({ prompt: "select_account" });
+    googleSignInBtn.addEventListener("click", async () => {
+      authMessage.textContent = "";
+      googleSignInBtn.disabled = true;
+      try {
+        await signInWithPopup(auth, googleProvider);
+      } catch (error) {
+        console.error("Google sign-in failed", error);
+        authMessage.textContent = `Google sign-in failed (${error.code || "unknown error"}).`;
+      } finally {
+        googleSignInBtn.disabled = false;
+      }
+    });
+
+    document.getElementById("signOutBtn").addEventListener("click", () => signOut(auth));
+
+    onAuthStateChanged(auth, async user => {
+      if (!user) {
+        document.body.classList.remove("authenticated");
+        appInitialized = false;
+        return;
+      }
+      if (user.email?.toLowerCase() !== authorizedEmail || !user.emailVerified) {
+        authMessage.textContent = `Access is restricted to ${authorizedEmail}.`;
+        await signOut(auth);
+        return;
+      }
+      if (appInitialized) return;
+
+      document.body.classList.add("authenticated");
+      try {
+        await seedDatabase();
+        await syncUserAndNavigation();
+        await renderPage();
+        appInitialized = true;
+      } catch (error) {
+        console.error("Unable to initialize the hospital app", error);
+        document.body.classList.remove("authenticated");
+        await signOut(auth);
+        authMessage.textContent = error.code === "permission-denied"
+          ? "Firestore denied access. Deploy the project's firestore.rules file, then sign in again."
+          : `Unable to load Firestore data (${error.code || "unknown error"}). Check the Firebase project configuration.`;
+      }
+    });
   </script>
 </body>
 </html>
