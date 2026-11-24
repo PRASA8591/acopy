@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hospital ERP — Module & Page RBAC (Vanilla JS + Dexie.js)</title>
+  <script src="https://unpkg.com/dexie@3.2.7/dist/dexie.min.js"></script>
+  <style>
+    :root {
+      --navy: #141c78;
+      --navy-dark: #0c1152;
+      --navy-light: #2531b5;
+      --bg: #eef2f6;
+      --card: #ffffff;
+      --border: #dce3ec;
+      --text: #0f172a;
+      --muted: #64748b;
+      --blue: #0ea5e9;
+      --amber: #eab308;
+      --green: #16a34a;
+      --red: #dc2626;
+      --purple: #7c3aed;
+      --teal: #0d9488;
+      --rose: #e11d48;
+      --slate: #334155;
+      --shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* Top Nav */
+    .topnav {
+      background: linear-gradient(90deg, var(--navy-dark), var(--navy));
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      height: 56px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
+      position: sticky;
+      top: 0;
+      z-index: 30;
+    }
+
+    .nav-left { display: flex; align-items: center; gap: 4px; height: 100%; overflow: hidden; }
+
+    .launcher-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.45);
+      background: var(--blue);
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      margin-right: 10px;
+      flex-shrink: 0;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .launcher-btn:hover { transform: scale(1.07); box-shadow: 0 0 0 4px rgba(255,255,255,0.15); }
+
+    .sub-tabs { display: flex; align-items: center; gap: 2px; height: 100%; overflow-x: auto; }
+    .sub-tab {
+      background: transparent;
+      color: #cbd5e1;
+      border: none;
+      height: 100%;
+      padding: 0 13px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .sub-tab:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .sub-tab.active {
+      background: rgba(255,255,255,0.16);
+      color: #fff;
+      border-bottom-color: #38bdf8;
+      font-weight: 600;
+    }
+
+    .nav-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,255,255,0.12);
+      padding: 5px 11px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.22);
+    }
+    .user-pill span { font-size: 12px; color: #cbd5e1; }
+    .user-pill select {
+      background: transparent;
+      color: #fff;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      max-width: 220px;
+    }
+    .user-pill select option { background: var(--navy-dark); color: #fff; }
+
+    /* App Launcher Popover */
+    .launcher-popover {
+      display: none;
+      position: fixed;
+      top: 62px;
+      left: 16px;
+      width: 380px;
+      max-width: calc(100vw - 32px);
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.25);
+      padding: 18px;
+      z-index: 50;
+      animation: popIn 0.14s ease-out;
+    }
+    @keyframes popIn {
+      from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .launcher-popover.open { display: block; }
+
+    .module-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 14px;
+      max-height: 360px;
+      overflow-y: auto;
+    }
+
+    .module-tile {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 6px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .module-tile:hover { background: #f8fafc; border-color: var(--border); transform: translateY(-2px); }
+    .module-tile.active-mod { background: #eff6ff; border-color: #93c5fd; }
+
+    .mod-circle {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-size: 20px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.14);
+    }
+    .mod-label { font-size: 12.5px; font-weight: 600; color: var(--text); text-align: center; }
+    .version-footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--navy);
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      font-weight: 600;
+    }
+
+    /* Main Workspace */
+    .container { max-width: 1280px; margin: 20px auto; padding: 0 18px; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      box-shadow: var(--shadow);
+      border-left: 4px solid var(--navy);
+    }
+    .stat-card.warn { border-left-color: var(--red); }
+    .stat-card.ok { border-left-color: var(--green); }
+    .stat-card.info { border-left-color: var(--blue); }
+    .stat-title { font-size: 11.5px; color: var(--muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.4px; }
+    .stat-value { font-size: 22px; font-weight: 700; color: var(--text); margin-top: 6px; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    h2 { font-size: 18px; color: var(--navy); font-weight: 700; }
+    h3 { font-size: 15px; color: var(--text); font-weight: 700; margin-bottom: 8px; }
+
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .toolbar input, .toolbar select { width: auto; min-width: 190px; }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-weight: 600; }
+    input, select, textarea {
+      width: 100%;
+      padding: 9px 11px;
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      font-size: 13.5px;
+      background: #fff;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px rgba(20, 28, 120, 0.1); }
+
+    .btn {
+      background: var(--navy);
+      color: #fff;
+      border: none;
+      padding: 9px 15px;
+      border-radius: 7px;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: var(--navy-light); }
+    .btn-success { background: var(--green); }
+    .btn-success:hover { background: #15803d; }
+    .btn-warning { background: #d97706; }
+    .btn-warning:hover { background: #b45309; }
+    .btn-danger { background: var(--red); }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-outline { background: #fff; color: var(--text); border: 1px solid #cbd5e1; }
+    .btn-outline:hover { background: #f8fafc; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 5px; }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+    th { background: #f8fafc; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+    tr:hover td { background: #f8fafc; }
+
+    .badge {
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-block;
+    }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-low { background: #fee2e2; color: #991b1b; }
+    .badge-info { background: #e0f2fe; color: #075985; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+    .badge-admin { background: #ede9fe; color: #5b21b6; }
+
+    .empty { text-align: center; color: var(--muted); padding: 26px; font-style: italic; }
+
+    /* Permission Matrix Box inside Modal */
+    .perm-module-box {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      background: #f8fafc;
+    }
+    .perm-module-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+    .perm-pages-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+      gap: 6px;
+      padding-left: 18px;
+    }
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .checkbox-item input { width: auto; cursor: pointer; }
+
+    /* Modal */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      z-index: 80;
+      place-items: center;
+      padding: 16px;
+    }
+    .modal-backdrop.open { display: grid; }
+    .modal-box {
+      background: #fff;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 660px;
+      max-height: 88vh;
+      overflow-y: auto;
+      padding: 22px;
+      box-shadow: 0 20px 45px rgba(0,0,0,0.25);
+      animation: popIn 0.15s ease-out;
+    }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 10px; position: sticky; top: 0; background: #fff; z-index: 2; }
+    .close-btn { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--muted); }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #0f172a;
+      color: #fff;
+      padding: 11px 18px;
+      border-radius: 8px;
+      font-size: 13.5px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+      opacity: 0;
+      transform: translateY(12px);
+      transition: all 0.2s ease;
+      z-index: 120;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="topnav">
+    <div class="nav-left">
+      <button id="launcherBtn" class="launcher-btn" title="Switch Module">💊</button>
+      <nav id="subTabs" class="sub-tabs"></nav>
+    </div>
+    <div class="nav-right">
+      <div class="user-pill">
+        <span>Active User:</span>
+        <select id="activeUserSelect"></select>
+      </div>
+    </div>
+  </header>
+
+  <!-- App Launcher Popover -->
+  <div id="launcherPopover" class="launcher-popover">
+    <div id="moduleGrid" class="module-grid"></div>
+    <div class="version-footer">Version Number 3.43.0-p1 • Module & Page RBAC</div>
+  </div>
+
+  <!-- Main Workspace -->
+  <main class="container">
+    <div id="pageContent"></div>
+  </main>
+
+  <!-- Modal -->
+  <div id="appModal" class="modal-backdrop">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="modalTitle">Modal</h2>
+        <button class="close-btn" onclick="closeModal()">&times;</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    // ==========================================
+    // 1. MODULES & PAGES DEFINITION
+    // ==========================================
+    const MODULES = {
+      STOCK: {
+        key: "STOCK",
+        label: "Stock",
+        icon: "💊",
+        color: "#0ea5e9",
+        pages: ["Stock", "Item Master", "Stock Issue", "GRN", "PO", "PR", "Bin Card", "Stock Taking"]
+      },
+      PHARMACY: {
+        key: "PHARMACY",
+        label: "Pharmacy",
+        icon: "🩺",
+        color: "#0d9488",
+        pages: ["Dispensing", "Prescriptions", "Batch & Expiry", "Pharmacy Stock"]
+      },
+      OPD_IPD: {
+        key: "OPD_IPD",
+        label: "OPD / IPD",
+        icon: "🏥",
+        color: "#2563eb",
+        pages: ["Patient Queue", "Consultations", "Ward & Beds", "Admissions"]
+      },
+      ETU_ICU: {
+        key: "ETU_ICU",
+        label: "ETU / ICU",
+        icon: "🚨",
+        color: "#e11d48",
+        pages: ["Emergency Triage", "ICU Vitals", "Critical Care Log"]
+      },
+      BILLING: {
+        key: "BILLING",
+        label: "Billing",
+        icon: "🧾",
+        color: "#7c3aed",
+        pages: ["OPD Billing", "IPD Settlement", "Receipts & Refunds"]
+      },
+      FINANCE: {
+        key: "FINANCE",
+        label: "Finance",
+        icon: "💵",
+        color: "#eab308",
+        pages: ["Valuation & Ledger", "Supplier GRN Bills", "Department Costing"]
+      },
+      LAB: {
+        key: "LAB",
+        label: "Laboratory",
+        icon: "🧪",
+        color: "#16a34a",
+        pages: ["Lab Requests", "Sample & Results", "Lab Consumables"]
+      },
+      ADMIN: {
+        key: "ADMIN",
+        label: "Admin",
+        icon: "⚙️",
+        color: "#334155",
+        pages: ["Users", "Page Permissions", "System Config"]
+      }
+    };
+
+    // ==========================================
+    // 2. DEXIE DATABASE SETUP
+    // ==========================================
+    const db = new Dexie("HospitalERP_RBAC_DB");
+    db.version(1).stores({
+      items: "++id, &code, name, category, batchNo, expiryDate, unit, qty, unitCost, reorderLevel",
+      binCards: "++id, itemCode, itemName, type, refNo, deptOrSupplier, qtyChange, balanceAfter, date",
+      grns: "++id, grnNo, supplier, itemCode, qty, unitCost, totalCost, date",
+      issues: "++id, issueNo, department, itemCode, qty, issuedBy, date",
+      pos: "++id, poNo, supplier, itemCode, qty, status, date",
+      prs: "++id, prNo, requestedBy, itemCode, qty, status, date",
+      patients: "++id, uhid, name, age, wardOrArea, status, billAmount, date",
+      prescriptions: "++id, rxNo, patientName, medicineCode, qty, status, date",
+      labOrders: "++id, orderNo, patientName, testName, status, result, date",
+      users: "++id, &username, fullName, role, isAdmin, status"
+    });
+
+    async function seedDatabase() {
+      if ((await db.items.count()) === 0) {
+        await db.items.bulkAdd([
+          { code: "MED-001", name: "Paracetamol 500mg Tab", category: "Pharmaceuticals", batchNo: "B-2026-A1", expiryDate: "2027-08-30", unit: "Box", qty: 150, unitCost: 450, reorderLevel: 40 },
+          { code: "MED-012", name: "Amoxicillin 250mg Cap", category: "Pharmaceuticals", batchNo: "B-2026-C4", expiryDate: "2027-02-15", unit: "Box", qty: 26, unitCost: 890, reorderLevel: 35 },
+          { code: "SUR-014", name: "Sterile Surgical Gloves (M)", category: "Surgical", batchNo: "S-881", expiryDate: "2028-05-01", unit: "Box", qty: 90, unitCost: 1200, reorderLevel: 30 },
+          { code: "IV-009", name: "Normal Saline 500ml", category: "IV Fluids", batchNo: "IV-309", expiryDate: "2027-01-20", unit: "Bottle", qty: 20, unitCost: 320, reorderLevel: 50 },
+          { code: "LAB-003", name: "EDTA Blood Tubes (Purple)", category: "Lab Consumables", batchNo: "L-104", expiryDate: "2027-11-10", unit: "Pack", qty: 65, unitCost: 1500, reorderLevel: 20 }
+        ]);
+        await db.binCards.bulkAdd([
+          { itemCode: "MED-001", itemName: "Paracetamol 500mg Tab", type: "OPENING", refNo: "INIT-01", deptOrSupplier: "Opening Stock", qtyChange: 150, balanceAfter: 150, date: "2026-11-01" },
+          { itemCode: "MED-012", itemName: "Amoxicillin 250mg Cap", type: "OPENING", refNo: "INIT-02", deptOrSupplier: "Opening Stock", qtyChange: 26, balanceAfter: 26, date: "2026-11-01" },
+          { itemCode: "SUR-014", itemName: "Sterile Surgical Gloves (M)", type: "OPENING", refNo: "INIT-03", deptOrSupplier: "Opening Stock", qtyChange: 90, balanceAfter: 90, date: "2026-11-01" },
+          { itemCode: "IV-009", itemName: "Normal Saline 500ml", type: "OPENING", refNo: "INIT-04", deptOrSupplier: "Opening Stock", qtyChange: 20, balanceAfter: 20, date: "2026-11-01" },
+          { itemCode: "LAB-003", itemName: "EDTA Blood Tubes (Purple)", type: "OPENING", refNo: "INIT-05", deptOrSupplier: "Opening Stock", qtyChange: 65, balanceAfter: 65, date: "2026-11-01" }
+        ]);
+      }
+
+      if ((await db.patients.count()) === 0) {
+        await db.patients.bulkAdd([
+          { uhid: "UHID-1001", name: "Kasun Wijesinghe", age: 34, wardOrArea: "OPD", status: "Waiting Consultation", billAmount: 2500, date: "2026-11-24" },
+          { uhid: "UHID-1002", name: "Nimali Fernando", age: 58, wardOrArea: "ICU", status: "Critical Monitoring", billAmount: 48500, date: "2026-11-24" },
+          { uhid: "UHID-1003", name: "Roshan Silva", age: 27, wardOrArea: "ETU", status: "Triage / Stabilizing", billAmount: 12000, date: "2026-11-24" }
+        ]);
+      }
+
+      if ((await db.prescriptions.count()) === 0) {
+        await db.prescriptions.bulkAdd([
+          { rxNo: "RX-501", patientName: "Kasun Wijesinghe", medicineCode: "MED-001", qty: 2, status: "Pending Dispense", date: "2026-11-24" },
+          { rxNo: "RX-502", patientName: "Roshan Silva", medicineCode: "IV-009", qty: 3, status: "Pending Dispense", date: "2026-11-24" }
+        ]);
+      }
+
+      if ((await db.labOrders.count()) === 0) {
+        await db.labOrders.bulkAdd([
+          { orderNo: "LAB-901", patientName: "Kasun Wijesinghe", testName: "Full Blood Count (FBC)", status: "Pending", result: "", date: "2026-11-24" },
+          { orderNo: "LAB-902", patientName: "Nimali Fernando", testName: "Serum Electrolytes", status: "Completed", result: "Na: 138, K: 4.2", date: "2026-11-24" }
+        ]);
+      }
+
+      // Default Users:
+      // 1) Super Admin -> Full access to ALL modules & ALL pages
+      // 2) Store Assistant -> Access to STOCK module, ONLY specific pages ("Stock", "Bin Card", "PR") — NO GRN, NO Item Master, NO Stock Taking!
+      // 3) Pharmacist -> Access to PHARMACY + STOCK (only "Stock")
+      if ((await db.users.count()) === 0) {
+        await db.users.bulkAdd([
+          {
+            username: "superadmin",
+            fullName: "System Admin (Full Access)",
+            role: "Administrator",
+            isAdmin: true,
+            permissions: {},
+            status: "Active"
+          },
+          {
+            username: "store_assist",
+            fullName: "Amila (Store Assistant — Limited Pages)",
+            role: "Store Assistant",
+            isAdmin: false,
+            permissions: {
+              STOCK: ["Stock", "Bin Card", "PR"]
+            },
+            status: "Active"
+          },
+          {
+            username: "pharmacist_1",
+            fullName: "Dilani (Pharmacist)",
+            role: "Chief Pharmacist",
+            isAdmin: false,
+            permissions: {
+              PHARMACY: ["Dispensing", "Prescriptions", "Batch & Expiry", "Pharmacy Stock"],
+              STOCK: ["Stock"]
+            },
+            status: "Active"
+          }
+        ]);
+      }
+    }
+
+    // ==========================================
+    // 3. PERMISSION ENGINE (MODULE + PAGE LEVEL)
+    // ==========================================
+    function getAllowedModules(user) {
+      if (!user) return [];
+      if (user.isAdmin) return Object.keys(MODULES);
+      const perms = user.permissions || {};
+      return Object.keys(MODULES).filter(modKey => Array.isArray(perms[modKey]) && perms[modKey].length > 0);
+    }
+
+    function getAllowedPages(user, modKey) {
+      if (!user) return [];
+      const allPages = MODULES[modKey]?.pages || [];
+      if (user.isAdmin) return allPages;
+      const userPages = user.permissions?.[modKey] || [];
+      return allPages.filter(p => userPages.includes(p));
+    }
+
+    function hasPageAccess(user, modKey, pageName) {
+      if (!user) return false;
+      if (user.isAdmin) return true;
+      return (user.permissions?.[modKey] || []).includes(pageName);
+    }
+
+    // ==========================================
+    // 4. APP STATE & HELPERS
+    // ==========================================
+    let state = {
+      currentUser: null,
+      activeModule: "STOCK",
+      activeTab: "Stock"
+    };
+
+    function showToast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.classList.add("show");
+      setTimeout(() => el.classList.remove("show"), 2600);
+    }
+
+    function openModal(title, html) {
+      document.getElementById("modalTitle").textContent = title;
+      document.getElementById("modalBody").innerHTML = html;
+      document.getElementById("appModal").classList.add("open");
+    }
+
+    function closeModal() {
+      document.getElementById("appModal").classList.remove("open");
+    }
+
+    function todayStr() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    // ==========================================
+    // 5. NAVIGATION & LAUNCHER RENDERING
+    // ==========================================
+    async function syncUserAndNavigation(preferredUserId = null) {
+      const activeUsers = await db.users.where("status").equals("Active").toArray();
+      const select = document.getElementById("activeUserSelect");
+
+      if (!activeUsers.length) return;
+
+      if (preferredUserId) {
+        state.currentUser = activeUsers.find(u => u.id === Number(preferredUserId)) || activeUsers[0];
+      } else if (state.currentUser) {
+        state.currentUser = activeUsers.find(u => u.id === state.currentUser.id) || activeUsers[0];
+      } else {
+        state.currentUser = activeUsers[0];
+      }
+
+      select.innerHTML = activeUsers.map(u => `
+        <option value="${u.id}" ${u.id === state.currentUser.id ? "selected" : ""}>
+          ${u.fullName} ${u.isAdmin ? "[ADMIN]" : ""}
+        </option>
+      `).join("");
+
+      const allowedMods = getAllowedModules(state.currentUser);
+      if (!allowedMods.includes(state.activeModule)) {
+        state.activeModule = allowedMods[0] || "STOCK";
+      }
+
+      const allowedPages = getAllowedPages(state.currentUser, state.activeModule);
+      if (!allowedPages.includes(state.activeTab)) {
+        state.activeTab = allowedPages[0] || "";
+      }
+
+      renderLauncher();
+      renderSubTabs();
+    }
+
+    function renderLauncher() {
+      const allowedMods = getAllowedModules(state.currentUser);
+      const grid = document.getElementById("moduleGrid");
+      const btn = document.getElementById("launcherBtn");
+
+      const currentMod = MODULES[state.activeModule] || MODULES.STOCK;
+      btn.textContent = currentMod.icon;
+      btn.style.background = currentMod.color;
+
+      if (!allowedMods.length) {
+        grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:16px; color:var(--red); font-size:13px;">No module access assigned to this user.</div>`;
+        return;
+      }
+
+      grid.innerHTML = allowedMods.map(key => {
+        const m = MODULES[key];
+        const pagesCount = getAllowedPages(state.currentUser, key).length;
+        const isActive = state.activeModule === key ? "active-mod" : "";
+        return `
+          <button class="module-tile ${isActive}" onclick="selectModule('${m.key}')">
+            <div class="mod-circle" style="background:${m.color}">${m.icon}</div>
+            <span class="mod-label">${m.label}</span>
+            <span style="font-size:10.5px; color:var(--muted);">${state.currentUser.isAdmin ? "All pages" : pagesCount + " pages"}</span>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function renderSubTabs() {
+      const allowedPages = getAllowedPages(state.currentUser, state.activeModule);
+      const container = document.getElementById("subTabs");
+      container.innerHTML = allowedPages.map(tab => `
+        <button class="sub-tab ${state.activeTab === tab ? "active" : ""}" onclick="selectTab('${tab}')">
+          ${tab}
+        </button>
+      `).join("");
+    }
+
+    async function selectModule(modKey) {
+      if (!getAllowedModules(state.currentUser).includes(modKey)) {
+        showToast("Access denied to this module!");
+        return;
+      }
+      state.activeModule = modKey;
+      const allowedPages = getAllowedPages(state.currentUser, modKey);
+      state.activeTab = allowedPages[0] || "";
+      document.getElementById("launcherPopover").classList.remove("open");
+      renderLauncher();
+      renderSubTabs();
+      await renderPage();
+    }
+
+    async function selectTab(tabName) {
+      if (!hasPageAccess(state.currentUser, state.activeModule, tabName)) {
+        showToast(`Access denied to "${tabName}" page!`);
+        return;
+      }
+      state.activeTab = tabName;
+      renderSubTabs();
+      await renderPage();
+    }
+
+    // ==========================================
+    // 6. PAGE ROUTER & ACCESS GUARD
+    // ==========================================
+    async function renderPage() {
+      const container = document.getElementById("pageContent");
+      const { currentUser, activeModule, activeTab } = state;
+
+      if (!currentUser || !getAllowedModules(currentUser).includes(activeModule) || !activeTab || !hasPageAccess(currentUser, activeModule, activeTab)) {
+        container.innerHTML = `
+          <div class="card" style="text-align:center; padding:36px;">
+            <h2 style="color:var(--red);">🔒 Page Access Restricted</h2>
+            <p style="margin-top:8px; color:var(--muted);">
+              User <strong>${currentUser?.fullName || ""}</strong> does not have permission for this module or page.
+              Switch to <strong>System Admin</strong> or assign page permissions in <strong>Admin → Users</strong>.
+            </p>
+          </div>`;
+        return;
+      }
+
+      // STOCK MODULE PAGES
+      if (activeModule === "STOCK") {
+        if (activeTab === "Stock") return renderStockDashboard(container);
+        if (activeTab === "Item Master") return renderItemMaster(container);
+        if (activeTab === "Stock Issue") return renderStockIssue(container);
+        if (activeTab === "GRN") return renderGRN(container);
+        if (activeTab === "PO") return renderPO(container);
+        if (activeTab === "PR") return renderPR(container);
+        if (activeTab === "Bin Card") return renderBinCard(container);
+        if (activeTab === "Stock Taking") return renderStockTaking(container);
+      }
+
+      // PHARMACY MODULE PAGES
+      if (activeModule === "PHARMACY") {
+        if (activeTab === "Dispensing") return renderPharmacyDispensing(container);
+        if (activeTab === "Prescriptions") return renderPharmacyPrescriptions(container);
+        if (activeTab === "Batch & Expiry") return renderBatchExpiry(container);
+        if (activeTab === "Pharmacy Stock") return renderPharmacyStock(container);
+      }
+
+      // OPD / IPD MODULE PAGES
+      if (activeModule === "OPD_IPD") {
+        if (activeTab === "Patient Queue") return renderPatientQueue(container);
+        if (activeTab === "Consultations") return renderConsultations(container);
+        if (activeTab === "Ward & Beds") return renderWardBeds(container);
+        if (activeTab === "Admissions") return renderAdmissions(container);
+      }
+
+      // ETU / ICU MODULE PAGES
+      if (activeModule === "ETU_ICU") {
+        if (activeTab === "Emergency Triage") return renderEmergencyTriage(container);
+        if (activeTab === "ICU Vitals") return renderIcuVitals(container);
+        if (activeTab === "Critical Care Log") return renderCriticalCareLog(container);
+      }
+
+      // BILLING MODULE PAGES
+      if (activeModule === "BILLING") {
+        return renderBillingModule(container, activeTab);
+      }
+
+      // FINANCE MODULE PAGES
+      if (activeModule === "FINANCE") {
+        return renderFinanceModule(container, activeTab);
+      }
+
+      // LAB MODULE PAGES
+      if (activeModule === "LAB") {
+        return renderLabModule(container, activeTab);
+      }
+
+      // ADMIN MODULE PAGES
+      if (activeModule === "ADMIN") {
+        if (activeTab === "Users") return renderAdminUsers(container);
+        if (activeTab === "Page Permissions") return renderPermissionMatrixOverview(container);
+        if (activeTab === "System Config") return renderSystemConfig(container);
+      }
+    }
+
+    // ==========================================
+    // 7. STOCK MODULE IMPLEMENTATIONS
+    // ==========================================
+    async function renderStockDashboard(container) {
+      const items = await db.items.toArray();
+      const lowCount = items.filter(i => i.qty <= i.reorderLevel).length;
+      const totalVal = items.reduce((s, i) => s + i.qty * i.unitCost, 0);
+
+      container.innerHTML = `
+        <div class="stats-grid">
+          <div class="stat-card info"><div class="stat-title">Total SKUs</div><div class="stat-value">${items.length}</div></div>
+          <div class="stat-card warn"><div class="stat-title">Low Stock Alerts</div><div class="stat-value" style="color:${lowCount ? 'var(--red)' : 'inherit'}">${lowCount}</div></div>
+          <div class="stat-card ok"><div class="stat-title">Total Units</div><div class="stat-value">${items.reduce((s, i) => s + i.qty, 0).toLocaleString()}</div></div>
+          <div class="stat-card"><div class="stat-title">Stock Valuation</div><div class="stat-value">LKR ${totalVal.toLocaleString()}</div></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h2>Central Warehouse Stock</h2>
+            <div class="toolbar">
+              <input type="text" id="stockSearch" placeholder="Search code or name..." />
+              <select id="stockFilter">
+                <option value="ALL">All Categories</option>
+                <option value="LOW">Low Stock Only</option>
+                <option value="Pharmaceuticals">Pharmaceuticals</option>
+                <option value="Surgical">Surgical</option>
+                <option value="IV Fluids">IV Fluids</option>
+                <option value="Lab Consumables">Lab Consumables</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Code</th><th>Item Name</th><th>Category</th><th>Batch</th><th>Expiry</th><th>Qty</th><th>Reorder</th><th>Unit Cost</th><th>Status</th></tr></thead>
+              <tbody id="stockBody"></tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      const draw = () => {
+        const q = document.getElementById("stockSearch").value.toLowerCase();
+        const f = document.getElementById("stockFilter").value;
+        const rows = items.filter(i => {
+          if (!i.code.toLowerCase().includes(q) && !i.name.toLowerCase().includes(q)) return false;
+          if (f === "ALL") return true;
+          if (f === "LOW") return i.qty <= i.reorderLevel;
+          return i.category === f;
+        });
+
+        document.getElementById("stockBody").innerHTML = rows.length ? rows.map(i => `
+          <tr>
+            <td><strong>${i.code}</strong></td>
+            <td>${i.name}</td>
+            <td><span class="badge badge-info">${i.category}</span></td>
+            <td>${i.batchNo || "-"}</td>
+            <td>${i.expiryDate || "-"}</td>
+            <td><strong>${i.qty}</strong> ${i.unit}</td>
+            <td>${i.reorderLevel}</td>
+            <td>LKR ${i.unitCost.toLocaleString()}</td>
+            <td>${i.qty <= i.reorderLevel ? '<span class="badge badge-low">Low Stock</span>' : '<span class="badge badge-ok">OK</span>'}</td>
+          </tr>
+        `).join("") : `<tr><td colspan="9" class="empty">No items found.</td></tr>`;
+      };
+
+      draw();
+      document.getElementById("stockSearch").addEventListener("input", draw);
+      document.getElementById("stockFilter").addEventListener("change", draw);
+    }
+
+    async function renderItemMaster(container) {
+      const items = await db.items.toArray();
+      container.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h2>Item Master (Add / Edit / Delete)</h2>
+            <button class="btn" onclick="openItemModal()">+ Add New Item</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Batch</th><th>Expiry</th><th>Unit</th><th>Qty</th><th>Cost</th><th>Reorder</th><th>Actions</th></tr></thead>
+              <tbody>
+                ${items.length ? items.map(i => `
+                  <tr>
+                    <td><strong>${i.code}</strong></td>
+                    <td>${i.name}</td>
+                    <td>${i.category}</td>
+                    <td>${i.batchNo || "-"}</td>
+                    <td>${i.expiryDate || "-"}</td>
+                    <td>${i.unit}</td>
+                    <td>${i.qty}</td>
+                    <td>${i.unitCost.toLocaleString()}</td>
+                    <td>${i.reorderLevel}</td>
+                    <td>
+                      <button class="btn btn-outline btn-sm" onclick="openItemModal(${i.id})">Edit</button>
+                      <button class="btn btn-danger btn-sm" onclick="deleteItem(${i.id}, '${i.code}')">Delete</button>
+                    </td>
+                  </tr>
+                `).join("") : `<tr><td colspan="10" class="empty">No items yet.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function openItemModal(id = null) {
+      const item = id ? await db.items.get(id) : null;
+      openModal(item ? `Edit Item — ${item.code}` : "Add New Item", `
+        <form id="itemForm">
+          <div class="form-grid">
+            <div><label>Item Code *</label><input type="text" id="mCode" value="${item ? item.code : ""}" ${item ? "readonly" : ""} required /></div>
+            <div><label>Item Name *</label><input type="text" id="mName" value="${item ? item.name : ""}" required /></div>
+            <div>
+              <label>Category</label>
+              <select id="mCat">
+                ${["Pharmaceuticals", "Surgical", "IV Fluids", "Lab Consumables", "General"].map(c => `<option value="${c}" ${item?.category === c ? "selected" : ""}>${c}</option>`).join("")}
+              </select>
+            </div>
+            <div><label>Batch No</label><input type="text" id="mBatch" value="${item?.batchNo || "B-2026-01"}" /></div>
+            <div><label>Expiry Date</label><input type="date" id="mExpiry" value="${item?.expiryDate || "2027-12-31"}" /></div>
+            <div><label>Unit</label><input type="text" id="mUnit" value="${item?.unit || "Box"}" required /></div>
+            <div><label>${item ? "Qty" : "Opening Qty"}</label><input type="number" id="mQty" min="0" value="${item ? item.qty : 0}" required /></div>
+            <div><label>Unit Cost (LKR)</label><input type="number" id="mCost" min="0" value="${item ? item.unitCost : 100}" required /></div>
+            <div><label>Reorder Level</label><input type="number" id="mReorder" min="0" value="${item ? item.reorderLevel : 20}" required /></div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn">${item ? "Update" : "Save Item"}</button>
+          </div>
+        </form>
+      `);
+
+      document.getElementById("itemForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const code = document.getElementById("mCode").value.trim().toUpperCase();
+        const name = document.getElementById("mName").value.trim();
+        const category = document.getElementById("mCat").value;
+        const batchNo = document.getElementById("mBatch").value.trim();
+        const expiryDate = document.getElementById("mExpiry").value;
+        const unit = document.getElementById("mUnit").value.trim();
+        const qty = Number(document.getElementById("mQty").value);
+        const unitCost = Number(document.getElementById("mCost").value);
+        const reorderLevel = Number(document.getElementById("mReorder").value);
+
+        try {
+          if (item) {
+            await db.items.update(item.id, { name, category, batchNo, expiryDate, unit, qty, unitCost, reorderLevel });
+            showToast(`Updated ${code}`);
+          } else {
+            await db.items.add({ code, name, category, batchNo, expiryDate, unit, qty, unitCost, reorderLevel });
+            if (qty > 0) {
+              await db.binCards.add({ itemCode: code, itemName: name, type: "OPENING", refNo: "NEW", deptOrSupplier: "Opening", qtyChange: qty, balanceAfter: qty, date: todayStr() });
+            }
+            showToast(`Added ${code}`);
+          }
+          closeModal();
+          renderItemMaster(document.getElementById("pageContent"));
+        } catch {
+          alert("Item code already exists!");
+        }
+      });
+    }
+
+    async function deleteItem(id, code) {
+      if (!confirm(`Delete ${code}?`)) return;
+      await db.items.delete(id);
+      showToast(`Deleted ${code}`);
+      renderItemMaster(document.getElementById("pageContent"));
+    }
+
+    async function renderStockIssue(container) {
+      const items = await db.items.toArray();
+      const issues = await db.issues.reverse().toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Stock Issue to Hospital Units</h2>
+          <form id="issueForm" style="margin-top:12px;">
+            <div class="form-grid">
+              <div><label>Issue No</label><input type="text" id="issNo" value="ISS-${Math.floor(1000 + Math.random() * 9000)}" required /></div>
+              <div>
+                <label>Department</label>
+                <select id="issDept"><option>Main Pharmacy</option><option>OPD</option><option>ETU</option><option>ICU</option><option>Ward 01</option><option>Laboratory</option></select>
+              </div>
+              <div><label>Item</label><select id="issItem">${items.map(i => `<option value="${i.code}">${i.code} - ${i.name} (${i.qty})</option>`).join("")}</select></div>
+              <div><label>Qty</label><input type="number" id="issQty" min="1" value="5" required /></div>
+            </div>
+            <button type="submit" class="btn btn-warning">Issue Stock</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>Stock Issue Log</h2>
+          <div class="table-wrap">
+            <table><thead><tr><th>Issue No</th><th>Department</th><th>Item</th><th>Qty</th><th>By</th><th>Date</th></tr></thead>
+            <tbody>${issues.length ? issues.map(x => `<tr><td>${x.issueNo}</td><td>${x.department}</td><td>${x.itemCode}</td><td>-${x.qty}</td><td>${x.issuedBy}</td><td>${x.date}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No issues yet.</td></tr>`}</tbody></table>
+          </div>
+        </div>
+      `;
+
+      document.getElementById("issueForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const issueNo = document.getElementById("issNo").value.trim();
+        const department = document.getElementById("issDept").value;
+        const itemCode = document.getElementById("issItem").value;
+        const qty = Number(document.getElementById("issQty").value);
+        const item = await db.items.where("code").equals(itemCode).first();
+        if (!item || qty > item.qty) { alert("Insufficient stock!"); return; }
+        const newBal = item.qty - qty;
+        await db.items.update(item.id, { qty: newBal });
+        await db.issues.add({ issueNo, department, itemCode, qty, issuedBy: state.currentUser.username, date: todayStr() });
+        await db.binCards.add({ itemCode: item.code, itemName: item.name, type: "ISSUE", refNo: issueNo, deptOrSupplier: department, qtyChange: -qty, balanceAfter: newBal, date: todayStr() });
+        showToast(`Issued ${qty} of ${itemCode} to ${department}`);
+        renderStockIssue(container);
+      });
+    }
+
+    async function renderGRN(container) {
+      const items = await db.items.toArray();
+      const grns = await db.grns.reverse().toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Goods Received Note (GRN)</h2>
+          <form id="grnForm" style="margin-top:12px;">
+            <div class="form-grid">
+              <div><label>GRN No</label><input type="text" id="grnNo" value="GRN-${Math.floor(1000 + Math.random() * 9000)}" required /></div>
+              <div><label>Supplier</label><input type="text" id="grnSup" placeholder="Supplier Name" required /></div>
+              <div><label>Item</label><select id="grnItem">${items.map(i => `<option value="${i.code}">${i.code} - ${i.name}</option>`).join("")}</select></div>
+              <div><label>Qty</label><input type="number" id="grnQty" min="1" value="20" required /></div>
+              <div><label>Unit Cost (LKR)</label><input type="number" id="grnCost" min="1" value="450" required /></div>
+            </div>
+            <button type="submit" class="btn btn-success">Post GRN</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>GRN History</h2>
+          <div class="table-wrap">
+            <table><thead><tr><th>GRN No</th><th>Supplier</th><th>Item</th><th>Qty</th><th>Unit Cost</th><th>Total</th><th>Date</th></tr></thead>
+            <tbody>${grns.length ? grns.map(g => `<tr><td>${g.grnNo}</td><td>${g.supplier}</td><td>${g.itemCode}</td><td>+${g.qty}</td><td>${g.unitCost}</td><td>${(g.totalCost || g.qty * g.unitCost).toLocaleString()}</td><td>${g.date}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No GRNs yet.</td></tr>`}</tbody></table>
+          </div>
+        </div>
+      `;
+
+      document.getElementById("grnForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const grnNo = document.getElementById("grnNo").value.trim();
+        const supplier = document.getElementById("grnSup").value.trim();
+        const itemCode = document.getElementById("grnItem").value;
+        const qty = Number(document.getElementById("grnQty").value);
+        const unitCost = Number(document.getElementById("grnCost").value);
+        const item = await db.items.where("code").equals(itemCode).first();
+        if (!item) return;
+        const newBal = item.qty + qty;
+        await db.items.update(item.id, { qty: newBal, unitCost });
+        await db.grns.add({ grnNo, supplier, itemCode, qty, unitCost, totalCost: qty * unitCost, date: todayStr() });
+        await db.binCards.add({ itemCode: item.code, itemName: item.name, type: "GRN", refNo: grnNo, deptOrSupplier: supplier, qtyChange: qty, balanceAfter: newBal, date: todayStr() });
+        showToast(`${grnNo} posted!`);
+        renderGRN(container);
+      });
+    }
+
+    async function renderPO(container) {
+      const items = await db.items.toArray();
+      const pos = await db.pos.reverse().toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Purchase Order (PO)</h2>
+          <form id="poForm" style="margin-top:12px;">
+            <div class="form-grid">
+              <div><label>PO No</label><input type="text" id="poNo" value="PO-${Math.floor(1000 + Math.random() * 9000)}" required /></div>
+              <div><label>Supplier</label><input type="text" id="poSup" required /></div>
+              <div><label>Item</label><select id="poItem">${items.map(i => `<option value="${i.code}">${i.code} - ${i.name}</option>`).join("")}</select></div>
+              <div><label>Qty</label><input type="number" id="poQty" min="1" value="50" required /></div>
+            </div>
+            <button type="submit" class="btn">Create PO</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>PO List</h2>
+          <div class="table-wrap">
+            <table><thead><tr><th>PO No</th><th>Supplier</th><th>Item</th><th>Qty</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
+            <tbody>${pos.length ? pos.map(p => `<tr><td>${p.poNo}</td><td>${p.supplier}</td><td>${p.itemCode}</td><td>${p.qty}</td><td><span class="badge ${p.status === 'Received' ? 'badge-ok' : 'badge-warn'}">${p.status}</span></td><td>${p.date}</td><td>${p.status === 'Pending' ? `<button class="btn btn-success btn-sm" onclick="receivePO(${p.id})">Receive</button>` : 'Done'}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No POs yet.</td></tr>`}</tbody></table>
+          </div>
+        </div>
+      `;
+      document.getElementById("poForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await db.pos.add({ poNo: document.getElementById("poNo").value.trim(), supplier: document.getElementById("poSup").value.trim(), itemCode: document.getElementById("poItem").value, qty: Number(document.getElementById("poQty").value), status: "Pending", date: todayStr() });
+        showToast("PO created");
+        renderPO(container);
+      });
+    }
+
+    async function receivePO(poId) {
+      const po = await db.pos.get(poId);
+      const item = await db.items.where("code").equals(po.itemCode).first();
+      const newBal = item.qty + po.qty;
+      const grnNo = `GRN-${po.poNo}`;
+      await db.items.update(item.id, { qty: newBal });
+      await db.pos.update(po.id, { status: "Received" });
+      await db.grns.add({ grnNo, supplier: po.supplier, itemCode: po.itemCode, qty: po.qty, unitCost: item.unitCost, totalCost: po.qty * item.unitCost, date: todayStr() });
+      await db.binCards.add({ itemCode: item.code, itemName: item.name, type: "GRN(PO)", refNo: grnNo, deptOrSupplier: po.supplier, qtyChange: po.qty, balanceAfter: newBal, date: todayStr() });
+      showToast(`${po.poNo} received as ${grnNo}`);
+      renderPO(document.getElementById("pageContent"));
+    }
+
+    async function renderPR(container) {
+      const items = await db.items.toArray();
+      const prs = await db.prs.reverse().toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Purchase Requisition (PR)</h2>
+          <form id="prForm" style="margin-top:12px;">
+            <div class="form-grid">
+              <div><label>PR No</label><input type="text" id="prNo" value="PR-${Math.floor(1000 + Math.random() * 9000)}" required /></div>
+              <div><label>Item</label><select id="prItem">${items.map(i => `<option value="${i.code}">${i.code} - ${i.name}</option>`).join("")}</select></div>
+              <div><label>Qty</label><input type="number" id="prQty" min="1" value="30" required /></div>
+            </div>
+            <button type="submit" class="btn">Submit PR</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>PR List</h2>
+          <div class="table-wrap">
+            <table><thead><tr><th>PR No</th><th>By</th><th>Item</th><th>Qty</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
+            <tbody>${prs.length ? prs.map(r => `<tr><td>${r.prNo}</td><td>${r.requestedBy}</td><td>${r.itemCode}</td><td>${r.qty}</td><td><span class="badge ${r.status === 'Approved' ? 'badge-ok' : 'badge-warn'}">${r.status}</span></td><td>${r.date}</td><td>${r.status === 'Pending' ? `<button class="btn btn-sm" onclick="approvePR(${r.id})">Approve</button>` : 'Approved'}</td></tr>`).join("") : `<tr><td colspan="7" class="empty">No PRs yet.</td></tr>`}</tbody></table>
+          </div>
+        </div>
+      `;
+      document.getElementById("prForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await db.prs.add({ prNo: document.getElementById("prNo").value.trim(), requestedBy: state.currentUser.username, itemCode: document.getElementById("prItem").value, qty: Number(document.getElementById("prQty").value), status: "Pending", date: todayStr() });
+        showToast("PR submitted");
+        renderPR(container);
+      });
+    }
+
+    async function approvePR(id) {
+      await db.prs.update(id, { status: "Approved" });
+      showToast("PR approved");
+      renderPR(document.getElementById("pageContent"));
+    }
+
+    async function renderBinCard(container) {
+      const items = await db.items.toArray();
+      const logs = await db.binCards.reverse().toArray();
+      container.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h2>Bin Card Ledger</h2>
+            <select id="binFilter" style="width:auto;min-width:220px;">
+              <option value="ALL">All Items</option>
+              ${items.map(i => `<option value="${i.code}">${i.code} - ${i.name}</option>`).join("")}
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table><thead><tr><th>Date</th><th>Code</th><th>Item</th><th>Type</th><th>Ref</th><th>Party/Dept</th><th>Change</th><th>Balance</th></tr></thead>
+            <tbody id="binBody"></tbody></table>
+          </div>
+        </div>
+      `;
+      const draw = () => {
+        const c = document.getElementById("binFilter").value;
+        const rows = c === "ALL" ? logs : logs.filter(l => l.itemCode === c);
+        document.getElementById("binBody").innerHTML = rows.length ? rows.map(l => `
+          <tr>
+            <td>${l.date}</td><td><strong>${l.itemCode}</strong></td><td>${l.itemName}</td>
+            <td><span class="badge badge-info">${l.type}</span></td><td>${l.refNo}</td><td>${l.deptOrSupplier || "-"}</td>
+            <td style="color:${l.qtyChange >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:700;">${l.qtyChange > 0 ? '+' + l.qtyChange : l.qtyChange}</td>
+            <td><strong>${l.balanceAfter}</strong></td>
+          </tr>
+        `).join("") : `<tr><td colspan="8" class="empty">No movements.</td></tr>`;
+      };
+      draw();
+      document.getElementById("binFilter").addEventListener("change", draw);
+    }
+
+    async function renderStockTaking(container) {
+      const items = await db.items.toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Stock Taking (Physical Audit)</h2>
+          <form id="stForm" style="margin-top:12px;">
+            <div class="form-grid">
+              <div><label>Item</label><select id="stItem">${items.map(i => `<option value="${i.code}">${i.code} - ${i.name} (Sys: ${i.qty})</option>`).join("")}</select></div>
+              <div><label>Physical Qty</label><input type="number" id="stQty" min="0" required /></div>
+            </div>
+            <button type="submit" class="btn">Adjust Stock</button>
+          </form>
+        </div>
+      `;
+      document.getElementById("stForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const code = document.getElementById("stItem").value;
+        const counted = Number(document.getElementById("stQty").value);
+        const item = await db.items.where("code").equals(code).first();
+        const diff = counted - item.qty;
+        await db.items.update(item.id, { qty: counted });
+        await db.binCards.add({ itemCode: item.code, itemName: item.name, type: "STOCK_TAKING", refNo: `ST-${Date.now().toString().slice(-4)}`, deptOrSupplier: "Physical Audit", qtyChange: diff, balanceAfter: counted, date: todayStr() });
+        showToast(`Adjusted ${code} to ${counted}`);
+        renderStockTaking(container);
+      });
+    }
+
+    // ==========================================
+    // 8. PHARMACY, OPD/IPD, ETU/ICU, BILLING, FINANCE, LAB
+    // ==========================================
+    async function renderPharmacyDispensing(container) {
+      const rxs = await db.prescriptions.reverse().toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Pharmacy Dispensing Counter</h2>
+          <div class="table-wrap" style="margin-top:12px;">
+            <table><thead><tr><th>Rx No</th><th>Patient</th><th>Medicine</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>${rxs.map(r => `
+              <tr>
+                <td><strong>${r.rxNo}</strong></td><td>${r.patientName}</td><td>${r.medicineCode}</td><td>${r.qty}</td>
+                <td><span class="badge ${r.status === 'Dispensed' ? 'badge-ok' : 'badge-warn'}">${r.status}</span></td>
+                <td>${r.status !== 'Dispensed' ? `<button class="btn btn-success btn-sm" onclick="dispenseRx(${r.id})">Dispense</button>` : 'Dispensed'}</td>
+              </tr>
+            `).join("")}</tbody></table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function dispenseRx(id) {
+      const rx = await db.prescriptions.get(id);
+      const item = await db.items.where("code").equals(rx.medicineCode).first();
+      if (item && item.qty >= rx.qty) {
+        const newBal = item.qty - rx.qty;
+        await db.items.update(item.id, { qty: newBal });
+        await db.binCards.add({ itemCode: item.code, itemName: item.name, type: "PHARMACY_RX", refNo: rx.rxNo, deptOrSupplier: rx.patientName, qtyChange: -rx.qty, balanceAfter: newBal, date: todayStr() });
+      }
+      await db.prescriptions.update(id, { status: "Dispensed" });
+      showToast(`Dispensed ${rx.rxNo}`);
+      renderPharmacyDispensing(document.getElementById("pageContent"));
+    }
+
+    async function renderPharmacyPrescriptions(container) {
+      const items = await db.items.where("category").equals("Pharmaceuticals").toArray();
+      const patients = await db.patients.toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>New Prescription Order</h2>
+          <form id="rxForm" style="margin-top:12px;">
+            <div class="form-grid">
+              <div><label>Patient</label><select id="rxPat">${patients.map(p => `<option>${p.name}</option>`).join("")}</select></div>
+              <div><label>Medicine</label><select id="rxMed">${items.map(i => `<option value="${i.code}">${i.code} - ${i.name}</option>`).join("")}</select></div>
+              <div><label>Qty</label><input type="number" id="rxQty" min="1" value="1" required /></div>
+            </div>
+            <button type="submit" class="btn">Send to Pharmacy</button>
+          </form>
+        </div>
+      `;
+      document.getElementById("rxForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await db.prescriptions.add({ rxNo: `RX-${Math.floor(1000 + Math.random() * 9000)}`, patientName: document.getElementById("rxPat").value, medicineCode: document.getElementById("rxMed").value, qty: Number(document.getElementById("rxQty").value), status: "Pending Dispense", date: todayStr() });
+        showToast("Prescription created");
+        renderPharmacyPrescriptions(container);
+      });
+    }
+
+    async function renderBatchExpiry(container) {
+      const items = await db.items.toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Batch & Expiry Tracking</h2>
+          <div class="table-wrap" style="margin-top:12px;">
+            <table><thead><tr><th>Code</th><th>Item</th><th>Batch No</th><th>Expiry Date</th><th>Stock Qty</th></tr></thead>
+            <tbody>${items.map(i => `<tr><td>${i.code}</td><td>${i.name}</td><td>${i.batchNo || "-"}</td><td><span class="badge badge-info">${i.expiryDate || "-"}</span></td><td>${i.qty}</td></tr>`).join("")}</tbody></table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderPharmacyStock(container) {
+      const meds = await db.items.where("category").equals("Pharmaceuticals").toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Pharmacy Stock Availability</h2>
+          <div class="table-wrap" style="margin-top:12px;">
+            <table><thead><tr><th>Code</th><th>Medicine</th><th>Available Qty</th><th>Unit</th></tr></thead>
+            <tbody>${meds.map(m => `<tr><td>${m.code}</td><td>${m.name}</td><td><strong>${m.qty}</strong></td><td>${m.unit}</td></tr>`).join("")}</tbody></table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderPatientQueue(container) {
+      const patients = await db.patients.toArray();
+      container.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h2>Register Patient & OPD/IPD Queue</h2>
+          </div>
+          <form id="patForm" style="margin-bottom:18px;">
+            <div class="form-grid">
+              <div><label>Patient Name</label><input type="text" id="pName" placeholder="Full Name" required /></div>
+              <div><label>Age</label><input type="number" id="pAge" min="1" max="120" value="30" required /></div>
+              <div><label>Area / Ward</label><select id="pArea"><option>OPD</option><option>Ward 01</option><option>ETU</option><option>ICU</option></select></div>
+              <div><label>Est. Bill (LKR)</label><input type="number" id="pBill" min="0" value="3000" required /></div>
+            </div>
+            <button type="submit" class="btn">Register Patient</button>
+          </form>
+          <div class="table-wrap">
+            <table><thead><tr><th>UHID</th><th>Name</th><th>Age</th><th>Area/Ward</th><th>Status</th><th>Bill (LKR)</th></tr></thead>
+            <tbody>${patients.map(p => `<tr><td><strong>${p.uhid}</strong></td><td>${p.name}</td><td>${p.age}</td><td><span class="badge badge-info">${p.wardOrArea}</span></td><td>${p.status}</td><td>${p.billAmount.toLocaleString()}</td></tr>`).join("")}</tbody></table>
+          </div>
+        </div>
+      `;
+      document.getElementById("patForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await db.patients.add({ uhid: `UHID-${Math.floor(1000 + Math.random() * 9000)}`, name: document.getElementById("pName").value.trim(), age: Number(document.getElementById("pAge").value), wardOrArea: document.getElementById("pArea").value, status: "Active", billAmount: Number(document.getElementById("pBill").value), date: todayStr() });
+        showToast("Patient registered");
+        renderPatientQueue(container);
+      });
+    }
+
+    async function renderConsultations(container) {
+      const list = await db.patients.toArray();
+      container.innerHTML = `<div class="card"><h2>OPD / IPD Consultations</h2><p style="color:var(--muted);margin-top:6px;">Active patients: ${list.length}</p></div>`;
+    }
+
+    async function renderWardBeds(container) {
+      container.innerHTML = `<div class="card"><h2>Ward & Bed Occupancy</h2><p style="color:var(--muted);margin-top:6px;">General Ward: 14/20 Beds Occupied • Surgical Ward: 8/12 Beds Occupied</p></div>`;
+    }
+
+    async function renderAdmissions(container) {
+      const list = await db.patients.toArray();
+      container.innerHTML = `<div class="card"><h2>Patient Admissions</h2><p style="color:var(--muted);margin-top:6px;">Total recorded patients in database: ${list.length}</p></div>`;
+    }
+
+    async function renderEmergencyTriage(container) {
+      const etu = await db.patients.where("wardOrArea").equals("ETU").toArray();
+      container.innerHTML = `<div class="card"><h2>ETU — Emergency Triage</h2><p style="color:var(--muted);margin-top:6px;">Current ETU cases: ${etu.length}</p></div>`;
+    }
+
+    async function renderIcuVitals(container) {
+      const icu = await db.patients.where("wardOrArea").equals("ICU").toArray();
+      container.innerHTML = `<div class="card"><h2>ICU — Patient Vitals & Monitoring</h2><p style="color:var(--muted);margin-top:6px;">Active ICU patients: ${icu.length}</p></div>`;
+    }
+
+    async function renderCriticalCareLog(container) {
+      container.innerHTML = `<div class="card"><h2>Critical Care Shift Log</h2><p style="color:var(--muted);margin-top:6px;">24-hour critical care handovers and medication notes.</p></div>`;
+    }
+
+    async function renderBillingModule(container, tab) {
+      const patients = await db.patients.toArray();
+      const totalBilled = patients.reduce((s, p) => s + (p.billAmount || 0), 0);
+      container.innerHTML = `
+        <div class="stats-grid">
+          <div class="stat-card ok"><div class="stat-title">Total Patient Bills</div><div class="stat-value">LKR ${totalBilled.toLocaleString()}</div></div>
+          <div class="stat-card info"><div class="stat-title">Billed Patients</div><div class="stat-value">${patients.length}</div></div>
+        </div>
+        <div class="card">
+          <h2>Billing — ${tab}</h2>
+          <div class="table-wrap" style="margin-top:12px;">
+            <table><thead><tr><th>UHID</th><th>Patient</th><th>Area</th><th>Bill Amount (LKR)</th></tr></thead>
+            <tbody>${patients.map(p => `<tr><td>${p.uhid}</td><td>${p.name}</td><td>${p.wardOrArea}</td><td><strong>${p.billAmount.toLocaleString()}</strong></td></tr>`).join("")}</tbody></table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderFinanceModule(container, tab) {
+      const items = await db.items.toArray();
+      const grns = await db.grns.toArray();
+      const val = items.reduce((s, i) => s + i.qty * i.unitCost, 0);
+      const spend = grns.reduce((s, g) => s + (g.totalCost || g.qty * g.unitCost), 0);
+      container.innerHTML = `
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-title">Inventory Asset Value</div><div class="stat-value">LKR ${val.toLocaleString()}</div></div>
+          <div class="stat-card info"><div class="stat-title">Total GRN Purchases</div><div class="stat-value">LKR ${spend.toLocaleString()}</div></div>
+        </div>
+        <div class="card"><h2>Finance — ${tab}</h2><p style="color:var(--muted);margin-top:6px;">Connected to Stock Valuation & GRN records.</p></div>
+      `;
+    }
+
+    async function renderLabModule(container, tab) {
+      const orders = await db.labOrders.toArray();
+      const consumables = await db.items.where("category").equals("Lab Consumables").toArray();
+      container.innerHTML = `
+        <div class="card">
+          <h2>Laboratory — ${tab}</h2>
+          <div class="table-wrap" style="margin-top:12px;">
+            <table><thead><tr><th>Order No</th><th>Patient</th><th>Test</th><th>Status</th><th>Result</th></tr></thead>
+            <tbody>${orders.map(o => `<tr><td>${o.orderNo}</td><td>${o.patientName}</td><td>${o.testName}</td><td><span class="badge ${o.status === 'Completed' ? 'badge-ok' : 'badge-warn'}">${o.status}</span></td><td>${o.result || "-"}</td></tr>`).join("")}</tbody></table>
+          </div>
+          <h3 style="margin-top:18px;">Lab Consumables Stock</h3>
+          <div class="table-wrap">
+            <table><thead><tr><th>Code</th><th>Item</th><th>Qty</th></tr></thead>
+            <tbody>${consumables.map(c => `<tr><td>${c.code}</td><td>${c.name}</td><td><strong>${c.qty}</strong></td></tr>`).join("")}</tbody></table>
+          </div>
+        </div>
+      `;
+    }
+
+    // ==========================================
+    // 9. ADMIN: USERS & MODULE+PAGE PERMISSIONS
+    // ==========================================
+    async function renderAdminUsers(container) {
+      const users = await db.users.toArray();
+      container.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h2>Users, Module Access & Page Permissions</h2>
+            <button class="btn" onclick="openUserModal()">+ Add New User</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Full Name</th>
+                  <th>Role</th>
+                  <th>Access Scope</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${users.map(u => {
+                  const modBadges = u.isAdmin
+                    ? `<span class="badge badge-admin">ALL MODULES & ALL PAGES (ADMIN)</span>`
+                    : Object.entries(u.permissions || {})
+                        .filter(([, pages]) => pages && pages.length > 0)
+                        .map(([mKey, pages]) => `<div style="margin-bottom:4px;"><span class="badge badge-info">${MODULES[mKey]?.label || mKey}</span> <span style="font-size:12px;color:var(--muted);">[${pages.join(", ")}]</span></div>`)
+                        .join("") || `<span class="badge badge-low">No Access</span>`;
+
+                  return `
+                    <tr>
+                      <td><strong>${u.username}</strong></td>
+                      <td>${u.fullName}</td>
+                      <td>${u.role}</td>
+                      <td>${modBadges}</td>
+                      <td><span class="badge ${u.status === 'Active' ? 'badge-ok' : 'badge-low'}">${u.status}</span></td>
+                      <td>
+                        <button class="btn btn-outline btn-sm" onclick="openUserModal(${u.id})">Edit Access</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${u.username}')">Remove</button>
+                      </td>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function openUserModal(id = null) {
+      const user = id ? await db.users.get(id) : null;
+      const isAdminChecked = user ? Boolean(user.isAdmin) : false;
+      const perms = user?.permissions || {};
+
+      const modulesHtml = Object.values(MODULES).map(mod => {
+        const selectedPages = perms[mod.key] || [];
+        const hasMod = selectedPages.length > 0;
+        return `
+          <div class="perm-module-box" data-mod="${mod.key}">
+            <div class="perm-module-header">
+              <label class="checkbox-item" style="font-weight:700; margin:0;">
+                <input type="checkbox" class="mod-master-cb" data-mod="${mod.key}" ${hasMod ? "checked" : ""} />
+                ${mod.icon} ${mod.label} Module
+              </label>
+              <span style="font-size:11px; color:var(--muted);">${mod.pages.length} pages</span>
+            </div>
+            <div class="perm-pages-grid">
+              ${mod.pages.map(pageName => `
+                <label class="checkbox-item">
+                  <input type="checkbox" class="page-cb" data-mod="${mod.key}" value="${pageName}" ${selectedPages.includes(pageName) ? "checked" : ""} />
+                  ${pageName}
+                </label>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      openModal(user ? `Edit User & Permissions — ${user.username}` : "Create New User", `
+        <form id="userForm">
+          <div class="form-grid">
+            <div><label>Username *</label><input type="text" id="uName" value="${user?.username || ""}" ${user ? "readonly" : ""} required /></div>
+            <div><label>Full Name *</label><input type="text" id="uFull" value="${user?.fullName || ""}" required /></div>
+            <div><label>Role *</label><input type="text" id="uRole" value="${user?.role || ""}" required /></div>
+            <div>
+              <label>Status</label>
+              <select id="uStatus">
+                <option value="Active" ${user?.status === "Active" ? "selected" : ""}>Active</option>
+                <option value="Inactive" ${user?.status === "Inactive" ? "selected" : ""}>Inactive</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-bottom:14px; padding:10px 12px; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:8px;">
+            <label class="checkbox-item" style="font-weight:700; color:#5b21b6; margin:0;">
+              <input type="checkbox" id="uIsAdmin" ${isAdminChecked ? "checked" : ""} />
+              👑 Super Admin (Full access to ALL modules & ALL pages)
+            </label>
+          </div>
+
+          <div id="granularPermsContainer" style="${isAdminChecked ? "opacity:0.45; pointer-events:none;" : ""}">
+            <label style="margin-bottom:8px;">Select Modules & Specific Pages Allowed for This User:</label>
+            ${modulesHtml}
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+            <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn">${user ? "Save Changes" : "Create User"}</button>
+          </div>
+        </form>
+      `);
+
+      // Toggle granular permissions when Super Admin checkbox changes
+      const adminCb = document.getElementById("uIsAdmin");
+      const granBox = document.getElementById("granularPermsContainer");
+      adminCb.addEventListener("change", () => {
+        if (adminCb.checked) {
+          granBox.style.opacity = "0.45";
+          granBox.style.pointerEvents = "none";
+        } else {
+          granBox.style.opacity = "1";
+          granBox.style.pointerEvents = "auto";
+        }
+      });
+
+      // Master module checkbox toggles all its pages
+      document.querySelectorAll(".mod-master-cb").forEach(mcb => {
+        mcb.addEventListener("change", () => {
+          const mk = mcb.dataset.mod;
+          document.querySelectorAll(`.page-cb[data-mod="${mk}"]`).forEach(pcb => {
+            pcb.checked = mcb.checked;
+          });
+        });
+      });
+
+      // If any page is checked, ensure master module cb is checked; if none checked, uncheck master
+      document.querySelectorAll(".page-cb").forEach(pcb => {
+        pcb.addEventListener("change", () => {
+          const mk = pcb.dataset.mod;
+          const anyChecked = Array.from(document.querySelectorAll(`.page-cb[data-mod="${mk}"]`)).some(c => c.checked);
+          const master = document.querySelector(`.mod-master-cb[data-mod="${mk}"]`);
+          if (master) master.checked = anyChecked;
+        });
+      });
+
+      document.getElementById("userForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const username = document.getElementById("uName").value.trim().toLowerCase();
+        const fullName = document.getElementById("uFull").value.trim();
+        const role = document.getElementById("uRole").value.trim();
+        const status = document.getElementById("uStatus").value;
+        const isAdmin = document.getElementById("uIsAdmin").checked;
+
+        const permissions = {};
+        if (!isAdmin) {
+          Object.keys(MODULES).forEach(mk => {
+            const checkedPages = Array.from(document.querySelectorAll(`.page-cb[data-mod="${mk}"]:checked`)).map(c => c.value);
+            if (checkedPages.length > 0) {
+              permissions[mk] = checkedPages;
+            }
+          });
+        }
+
+        try {
+          if (user) {
+            await db.users.update(user.id, { fullName, role, status, isAdmin, permissions });
+            showToast(`Updated permissions for ${username}`);
+          } else {
+            await db.users.add({ username, fullName, role, status, isAdmin, permissions });
+            showToast(`Created user ${username}`);
+          }
+          closeModal();
+          await syncUserAndNavigation(state.currentUser?.id);
+          await renderPage();
+        } catch {
+          alert("Username already exists!");
+        }
+      });
+    }
+
+    async function deleteUser(id, username) {
+      if ((await db.users.count()) <= 1) {
+        alert("At least one user must remain in the system.");
+        return;
+      }
+      if (!confirm(`Remove user "${username}"?`)) return;
+      await db.users.delete(id);
+      showToast(`Removed user ${username}`);
+      await syncUserAndNavigation();
+      await renderPage();
+    }
+
+    async function renderPermissionMatrixOverview(container) {
+      container.innerHTML = `
+        <div class="card">
+          <h2>System Modules & Pages Catalog</h2>
+          <div class="table-wrap" style="margin-top:12px;">
+            <table>
+              <thead><tr><th>Module</th><th>Available Pages</th></tr></thead>
+              <tbody>
+                ${Object.values(MODULES).map(m => `
+                  <tr>
+                    <td><strong>${m.icon} ${m.label}</strong></td>
+                    <td>${m.pages.map(p => `<span class="badge badge-info" style="margin:2px;">${p}</span>`).join(" ")}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSystemConfig(container) {
+      container.innerHTML = `
+        <div class="card">
+          <h2>System Configuration & Dexie Storage</h2>
+          <p style="color:var(--muted);margin:10px 0;">Data stored in IndexedDB database: <strong>HospitalERP_RBAC_DB</strong></p>
+          <button class="btn btn-danger" onclick="resetDB()">Reset All Demo Data</button>
+        </div>
+      `;
+    }
+
+    async function resetDB() {
+      if (!confirm("Reset database to initial demo records?")) return;
+      await db.delete();
+      location.reload();
+    }
+
+    // ==========================================
+    // 10. EVENT LISTENERS & BOOT
+    // ==========================================
+    document.getElementById("launcherBtn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      document.getElementById("launcherPopover").classList.toggle("open");
+    });
+
+    document.addEventListener("click", (e) => {
+      const pop = document.getElementById("launcherPopover");
+      if (!pop.contains(e.target) && e.target.id !== "launcherBtn") {
+        pop.classList.remove("open");
+      }
+    });
+
+    document.getElementById("activeUserSelect").addEventListener("change", async (e) => {
+      await syncUserAndNavigation(Number(e.target.value));
+      await renderPage();
+      showToast(`Logged in as ${state.currentUser.fullName}`);
+    });
+
+    (async function init() {
+      await seedDatabase();
+      await syncUserAndNavigation();
+      await renderPage();
+    })();
+  </script>
+</body>
+</html>
